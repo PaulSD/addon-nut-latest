@@ -1,0 +1,7 @@
+Package: *
+Pin: release o=Debian,a=unstable
+Pin-Priority: 99
+
+Package: src:nut
+Pin: release o=Debian,a=unstable
+Pin-Priority: 990
