@@ -5,7 +5,8 @@ FROM ${BUILD_FROM}
 # For clarity, upgrade Debian Stable before upgrading NUT.
 RUN \
     apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y \
+    && export DEBIAN_FRONTEND=noninteractive \
+    && apt-get dist-upgrade -y \
     && apt-get autoremove --purge \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -15,7 +16,8 @@ RUN \
 COPY rootfs /
 RUN \
     apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y \
+    && export DEBIAN_FRONTEND=noninteractive \
+    && apt-get dist-upgrade -y \
     && apt-get autoremove --purge \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
