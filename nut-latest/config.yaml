@@ -1,6 +1,6 @@
 ---
 name: Network UPS Tools (Latest version)
-version: 0.0.0
+version: 0.0.1
 slug: nut_latest
 description: Manage battery backup (UPS) devices
 url: "https://github.com/PaulSD/addon-nut-latest/tree/main/nut-latest"

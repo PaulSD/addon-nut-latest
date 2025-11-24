@@ -2,13 +2,20 @@ ARG BUILD_FROM=ghcr.io/hassio-addons/nut:stable
 # hadolint ignore=DL3006
 FROM ${BUILD_FROM}
 
-# Upgrade NUT using Debian Unstable/Sid,
-# and upgrade everything else using Debian Stable
+# For clarity, upgrade Debian Stable before upgrading NUT.
+RUN \
+    apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y \
+    && apt-get autoremove --purge \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade NUT using Debian Unstable/Sid.
 # hadolint ignore=DL3003
 COPY rootfs /
 RUN \
     apt-get update \
-    && apt-get dist-upgrade -y \
+    && DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y \
     && apt-get autoremove --purge \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
