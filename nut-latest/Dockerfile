@@ -3,11 +3,9 @@ ARG BUILD_FROM=ghcr.io/hassio-addons/nut:stable
 FROM ${BUILD_FROM}
 
 # For clarity, upgrade Debian Stable before upgrading NUT.
-ARG DEBIAN_FRONTEND=noninteractive
 RUN \
     apt-get update \
-    && export DEBIAN_FRONTEND=noninteractive \
-    && apt-get dist-upgrade -y \
+    && apt-get -o 'Dpkg::Options::=--force-confold' dist-upgrade -y \
     && apt-get autoremove --purge \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -17,8 +15,7 @@ RUN \
 COPY rootfs /
 RUN \
     apt-get update \
-    && export DEBIAN_FRONTEND=noninteractive \
-    && apt-get dist-upgrade -y \
+    && apt-get -o 'Dpkg::Options::=--force-confold' dist-upgrade -y \
     && apt-get autoremove --purge \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
