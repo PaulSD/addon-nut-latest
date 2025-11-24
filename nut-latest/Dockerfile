@@ -3,6 +3,7 @@ ARG BUILD_FROM=ghcr.io/hassio-addons/nut:stable
 FROM ${BUILD_FROM}
 
 # For clarity, upgrade Debian Stable before upgrading NUT.
+ARG DEBIAN_FRONTEND=noninteractive
 RUN \
     apt-get update \
     && export DEBIAN_FRONTEND=noninteractive \
