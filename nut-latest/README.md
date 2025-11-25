@@ -8,7 +8,7 @@ For users who need (or want to test with) a newer version of NUT,
 this add-on is based on the "Network UPS Tools" add-on but it provides the version of NUT in
 Debian Unstable (Sid).
 
-For information on using this add-on, see [this add-on's documentation](DOCS.md).
+For information on installing and using this add-on, see [this add-on's documentation](DOCS.md).
 For information on using NUT in Home Assistant, see the
 [NUT Integration documentation][nut-ha-docs].
 
