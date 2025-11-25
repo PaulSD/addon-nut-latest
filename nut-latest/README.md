@@ -11,7 +11,7 @@ Debian Unstable (Sid).
 For information on installing and using this add-on, see [this add-on's documentation](DOCS.md).
 
 For information on using NUT in Home Assistant, see the
-[NUT Integration documentation][nut-ha-docs].
+[NUT HA Integration documentation][nut-ha-docs].
 
 [addon-nut]: https://github.com/hassio-addons/addon-nut
 [nut-ha-docs]: https://www.home-assistant.io/integrations/nut/
