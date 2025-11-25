@@ -2,7 +2,9 @@
 
 A ["Network UPS Tools"][addon-nut] add-on based on Debian Stable is already available from the
 "Home Assistant Community Add-ons" repository.  However, the version of NUT in Debian Stable is
-typically significantly outdated.  For users who need (or want to test with) a newer version of NUT,
+typically significantly outdated.
+
+For users who need (or want to test with) a newer version of NUT,
 this add-on is based on the "Network UPS Tools" add-on but it provides the version of NUT in
 Debian Unstable (Sid).
 
