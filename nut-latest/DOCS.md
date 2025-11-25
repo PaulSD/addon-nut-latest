@@ -96,7 +96,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 [addon-inst-badge]: https://my.home-assistant.io/badges/supervisor_addon.svg
-[addon-inst]: https://my.home-assistant.io/redirect/supervisor_addon/?addon=a0d7b954_nut_latest&repository_url=https%3A%2F%2Fgithub.com%2FPaulSD%2Faddon-nut-latest
+[addon-inst]: https://my.home-assistant.io/redirect/supervisor_addon/?addon=40e42f29_nut-latest&repository_url=https%3A%2F%2Fgithub.com%2FPaulSD%2Faddon-nut-latest
 [addon-nut]: https://github.com/hassio-addons/addon-nut
 [addon-nut-docs]: https://github.com/hassio-addons/addon-nut/blob/main/nut/DOCS.md
 [addon-nut-docs-conf]: https://github.com/hassio-addons/addon-nut/blob/main/nut/DOCS.md#configuration
