@@ -9,6 +9,7 @@ this add-on is based on the "Network UPS Tools" add-on but it provides the versi
 Debian Unstable (Sid).
 
 For information on installing and using this add-on, see [this add-on's documentation](DOCS.md).
+
 For information on using NUT in Home Assistant, see the
 [NUT Integration documentation][nut-ha-docs].
 
