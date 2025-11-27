@@ -1,5 +1,195 @@
 #!/bin/bash
-set -e
+
+# DOCS.md
+#  local repo URL in "Add ..."
+#  github-issue and contributors URLs
+#  addon-inst URL (generated from local repo URL and add-on name)
+#  addon-nut* URLs (source repos)
+#  (switch to addon-base?)
+# README.md
+#  base source URL (or URL+path)
+# icon.png logo.png
+#  pull from base repo (need base repo URL+path)
+# config.yaml
+#  pull from base repo to new file (add new file to .gitignore, and .sw*)
+#  substitute name from old file
+#  substitute image from old file
+#  update version: base->base_deb_local
+#  update slug (need dir name)
+#  update url (local URL+path)
+#  swap in new file
+# build.yaml
+#  pull from repo (need repo URL+path), substitute image path+version (from base config.yaml)
+# Dockerfile
+#  update BUILD_FROM (from base config.yaml image)
+#  update maintainer (if not specified, use URL)
+#  update authors (use URL)
 
 # check how run
 # if version is 'reset' then force reset
+
+#* Edit `nut-latest/config.yaml` and update the `url` and `image` fields.
+#  The `image` value must be lowercase.
+#* Edit `nut-latest/DOCS.md`:
+#  * Update the URL in step 1 of the "Installation" instructions.
+#  * Update `repository_url` parameter within the `addon-inst` URL.
+#  * Update the repository hash value in the `addon` parameter within the `addon-inst` URL.
+#    To calculate the new hash value, use one of the following:
+#    * `python` followed by `url = 'https://github.com/PaulSD/addons-nut'` (substitute your Git repo
+#      URL) followed by `import hashlib ; hashlib.sha1(url.lower().encode()).hexdigest()[:8] ; exit(>
+#      followed by `exit()`.
+#    * In a BASH shell, run `URL='https://github.com/PaulSD/addons-nut'` (substitute your Git repo
+#      URL) followed by ``.
+#      echo -n 'https://github.com/PaulSD/addon-nut-latest' | tr '[:upper:]' '[:lower:]' | sha1sum |>
+#  * Update the `github-issue` and `contributors` URLs.
+#* Edit `nut-latest/Dockerfile` and update the `maintainer` and `org.opencontainers.image.authors`
+#  fields.
+#
+#update version in config.yaml
+#if addon-nut repo changes, then update *.png and config.yaml (merge/patch)
+#
+#       for debian checks
+#        https://docs.github.com/en/actions/tutorials/store-and-share-data
+#        save last nut version and use cron dispatch to check/quit?
+#
+#
+#https://qa.debian.org/madison.php?package=nut&table=debian&a=&c=&s=unstable+&text=on#
+
+exit
+
+#!/bin/bash
+
+Usage()
+{
+  [ -n "$1" ] && { echo "ERROR: $1" >&2 ; echo >&2 ; }
+  cat <<END >&2
+Usage: $ScriptName [options]
+
+This script updates the Git repository URL and maintainer in 'repository.yaml',
+calls the \`update\` script for each add-on in this repository (which will
+update Git URLs, maintainer references, version numbers, etc for the add-on),
+then commits and pushes the Git repo.
+
+This script is primarily intended to be run by a GitHub workflow, but may be run
+manually.
+
+Options:
+
+  --git-repo <url>       Specify Git repository URL
+    If run by a GitHub workflow and this is not specified, the Git repository
+    URL will be automatically detected.
+    If run manually and this is not specified, the Git repository URL will not
+    be updated.
+  --maintainer <value>   Specify maintainer
+    HA recommends setting this to 'Full Name <email@example.com>'.
+    If run by a GitHub workflow and this is not specified, the Git repository
+    owner username will be used.
+    If run manually and this is not specified, the maintainer will not be
+    updated.
+
+  --no-addon-update      Do not run the \`update\` script for each add-on.
+  -n, --no-commit        Do not commit changes to Git.
+  --no-push              Do not push Git commits.
+
+END
+  exit 1
+}
+
+ScriptName="$(basename "$0")"
+# Default to values provided by the GitHub workflow (or empty if not run by a GitHub workflow).
+if [ -n "$GITHUB_SERVER_URL" ] && [ -n "$GITHUB_REPOSITORY" ] ; then
+  GitRepo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+else
+  GitRepo=
+fi
+Maintainer="$GITHUB_REPOSITORY_OWNER"
+AddonUpdate='y'
+GitCommit='y'
+GitPush='y'
+AddonUpdateArgs=()
+
+# Parse command-line arguments
+while [ $# -gt 0 ] ; do
+  case "$1" in
+    --git-repo)
+      [ $# -eq 1 ] && Usage "URL required after '$1'"
+      shift
+      GitRepo="$1"
+      AddonUpdateArgs+=(--git-repo "$GitRepo")
+    ;;
+    --maintainer)
+      [ $# -eq 1 ] && Usage "Maintainer value required after '$1'"
+      shift
+      Maintainer="$1"
+      AddonUpdateArgs+=(--maintainer "$Maintainer")
+    ;;
+    --no-addon-update)
+      AddonUpdate='n'
+    ;;
+    -n|--no-commit)
+      GitCommit='n'
+      AddonUpdateArgs+=(--no-commit)
+    ;;
+    --no-push)
+      GitPush='n'
+      # --no-push is added to $AddonUpdateArgs below
+    ;;
+    -h|--help)
+      Usage
+    ;;
+    *)
+      Usage "Invalid option '$1'"
+    ;;
+  esac
+  shift
+done
+
+set -e
+Script="$(readlink -e "$(which "$0")")"
+cd "$(dirname "$Script")"  # This script's path
+
+# Check for changes that haven't been committed in Git
+if [ -n "$(git status -s)" ] ; then
+  echo 'ERROR: Detected changes that have not been committed in Git.' >&2
+  echo 'Please commit or stash your changes in Git before running this script.' >&2
+  exit 10
+# Check for Git commits that haven't been pushed
+elif ! git diff --quiet HEAD..@{push} ; then
+  echo 'ERROR: Detected Git commits that have not been pushed.' >&2
+  echo 'Please push your Git commits before running this script.' >&2
+  exit 11
+fi
+
+# Update the Git repository URL in 'repository.yaml'
+if [ -n "$GitRepo" ] ; then
+  perl -i -p -e 's/^(url: ).*$/$1'"$GitRepo"'/;' repository.yaml
+fi
+
+# Update the Maintainer in 'repository.yaml'
+if [ -n "$Maintainer" ] ; then
+  perl -i -p -e 's/^(maintainer: ).*$/$1'"$Maintainer"'/;' repository.yaml
+fi
+
+# If the above resulted in any changes, commit the changes to Git
+if [ "$GitCommit" = 'y' ] && [ -n "$(git status -s)" ] ; then
+  git add --all .
+  git commit --all --message "(./$ScriptName) Update repository"
+fi
+
+# Run the `update` script for each add-on
+if [ "$AddonUpdate" = 'y' ] ; then
+  # Each script will commit its own changes, but to avoid triggering redundant GitHub workflow runs,
+  # $AddonUpdateArgs always includes --no-push, and this script pushes after all scripts have been
+  # run.
+  AddonUpdateArgs+=(--no-push)
+  while read -u3 -r -d $'\0' Script ; do
+    "$Script" "${AddonUpdateArgs[@]}"
+  done 3< <(find -L . -mindepth 2 -maxdepth 2 -name update -type f -executable -print0)
+fi
+
+# If the above resulted in any commits, push Git
+if [ "$GitPush" = 'y' ] && ! git diff --quiet HEAD..@{push} ; then
+  git push
+fi
+
+echo 'Completed successfully'

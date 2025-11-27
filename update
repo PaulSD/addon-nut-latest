@@ -37,7 +37,6 @@ END
 }
 
 ScriptName="$(basename "$0")"
-ScriptArgs=("$@")
 # Default to values provided by the GitHub workflow (or empty if not run by a GitHub workflow).
 if [ -n "$GITHUB_SERVER_URL" ] && [ -n "$GITHUB_REPOSITORY" ] ; then
   GitRepo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
@@ -48,28 +47,33 @@ Maintainer="$GITHUB_REPOSITORY_OWNER"
 AddonUpdate='y'
 GitCommit='y'
 GitPush='y'
+AddonUpdateArgs=()
 
 # Parse command-line arguments
 while [ $# -gt 0 ] ; do
-  case $1 in
+  case "$1" in
     --git-repo)
       [ $# -eq 1 ] && Usage "URL required after '$1'"
       shift
       GitRepo="$1"
+      AddonUpdateArgs+=(--git-repo "$GitRepo")
     ;;
     --maintainer)
       [ $# -eq 1 ] && Usage "Maintainer value required after '$1'"
       shift
       Maintainer="$1"
+      AddonUpdateArgs+=(--maintainer "$Maintainer")
     ;;
     --no-addon-update)
       AddonUpdate='n'
     ;;
     -n|--no-commit)
       GitCommit='n'
+      AddonUpdateArgs+=(--no-commit)
     ;;
     --no-push)
       GitPush='n'
+      # --no-push is added to $AddonUpdateArgs below
     ;;
     -h|--help)
       Usage
@@ -85,11 +89,16 @@ set -e
 Script="$(readlink -e "$(which "$0")")"
 cd "$(dirname "$Script")"  # This script's path
 
-# Check for uncommitted changes in Git
+# Check for changes that haven't been committed in Git
 if [ -n "$(git status -s)" ] ; then
-  echo 'ERROR: Uncommitted changes detected.' >&2
+  echo 'ERROR: Detected changes that have not been committed in Git.' >&2
   echo 'Please commit or stash your changes in Git before running this script.' >&2
   exit 10
+# Check for Git commits that haven't been pushed
+elif ! git diff --quiet HEAD..@{push} ; then
+  echo 'ERROR: Detected Git commits that have not been pushed.' >&2
+  echo 'Please push your Git commits before running this script.' >&2
+  exit 11
 fi
 
 # Update the Git repository URL in 'repository.yaml'
@@ -109,14 +118,19 @@ if [ "$GitCommit" = 'y' ] && [ -n "$(git status -s)" ] ; then
 fi
 
 # Run the `update` script for each add-on
-# (Each script will commit its own changes, but to avoid triggering redundant GitHub workflow runs,
-# don't push the Git commits until all scripts have finished.)
 if [ "$AddonUpdate" = 'y' ] ; then
-  find . -mindepth 2 -maxdepth 2 -name update -L -type f -executable \
-   -execdir '{}' "${ScriptArgs[@]}" --no-push '+'
+  # Each script will commit its own changes, but to avoid triggering redundant GitHub workflow runs,
+  # $AddonUpdateArgs always includes --no-push, and this script pushes after all scripts have been
+  # run.
+  AddonUpdateArgs+=(--no-push)
+  while read -u3 -r -d $'\0' Script ; do
+    "$Script" "${AddonUpdateArgs[@]}"
+  done 3< <(find -L . -mindepth 2 -maxdepth 2 -name update -type f -executable -print0)
 fi
 
 # If the above resulted in any commits, push Git
-if [ "$GitPush" = 'y' ] && git diff --quiet HEAD..origin ; then
+if [ "$GitPush" = 'y' ] && ! git diff --quiet HEAD..@{push} ; then
   git push
 fi
+
+echo 'Completed successfully'
