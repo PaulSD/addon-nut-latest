@@ -1,0 +1,122 @@
+#!/bin/bash
+
+Usage()
+{
+  [ -n "$1" ] && { echo "ERROR: $1" >&2 ; echo >&2 ; }
+  cat <<END >&2
+Usage: $ScriptName [options]
+
+This script updates the Git repository URL and maintainer in 'repository.yaml',
+calls the \`update\` script for each add-on in this repository (which will
+update Git URLs, maintainer references, version numbers, etc for the add-on),
+then commits and pushes the Git repo.
+
+This script is primarily intended to be run by a GitHub workflow, but may be run
+manually.
+
+Options:
+
+  --git-repo <url>       Specify Git repository URL
+    If run by a GitHub workflow and this is not specified, the Git repository
+    URL will be automatically detected.
+    If run manually and this is not specified, the Git repository URL will not
+    be updated.
+  --maintainer <value>   Specify maintainer
+    HA recommends setting this to 'Full Name <email@example.com>'.
+    If run by a GitHub workflow and this is not specified, the Git repository
+    owner username will be used.
+    If run manually and this is not specified, the maintainer will not be
+    updated.
+
+  --no-addon-update      Do not run the \`update\` script for each add-on.
+  -n, --no-commit        Do not commit changes to Git.
+  --no-push              Do not push Git commits.
+
+END
+  exit 1
+}
+
+ScriptName="$(basename "$0")"
+ScriptArgs=("$@")
+# Default to values provided by the GitHub workflow (or empty if not run by a GitHub workflow).
+if [ -n "$GITHUB_SERVER_URL" ] && [ -n "$GITHUB_REPOSITORY" ] ; then
+  GitRepo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+else
+  GitRepo=
+fi
+Maintainer="$GITHUB_REPOSITORY_OWNER"
+AddonUpdate='y'
+GitCommit='y'
+GitPush='y'
+
+# Parse command-line arguments
+while [ $# -gt 0 ] ; do
+  case $1 in
+    --git-repo)
+      [ $# -eq 1 ] && Usage "URL required after '$1'"
+      shift
+      GitRepo="$1"
+    ;;
+    --maintainer)
+      [ $# -eq 1 ] && Usage "Maintainer value required after '$1'"
+      shift
+      Maintainer="$1"
+    ;;
+    --no-addon-update)
+      AddonUpdate='n'
+    ;;
+    -n|--no-commit)
+      GitCommit='n'
+    ;;
+    --no-push)
+      GitPush='n'
+    ;;
+    -h|--help)
+      Usage
+    ;;
+    *)
+      Usage "Invalid option '$1'"
+    ;;
+  esac
+  shift
+done
+
+set -e
+Script="$(readlink -e "$(which "$0")")"
+cd "$(dirname "$Script")"  # This script's path
+
+# Check for uncommitted changes in Git
+if [ -n "$(git status -s)" ] ; then
+  echo 'ERROR: Uncommitted changes detected.' >&2
+  echo 'Please commit or stash your changes in Git before running this script.' >&2
+  exit 10
+fi
+
+# Update the Git repository URL in 'repository.yaml'
+if [ -n "$GitRepo" ] ; then
+  perl -i -p -e 's/^(url: ).*$/$1'"$GitRepo"'/;' repository.yaml
+fi
+
+# Update the Maintainer in 'repository.yaml'
+if [ -n "$Maintainer" ] ; then
+  perl -i -p -e 's/^(maintainer: ).*$/$1'"$Maintainer"'/;' repository.yaml
+fi
+
+# If the above resulted in any changes, commit the changes to Git
+if [ "$GitCommit" = 'y' ] && [ -n "$(git status -s)" ] ; then
+  git add --all .
+  git commit --all --message "(./$ScriptName) Update repository"
+fi
+
+# Run the `update` script for each add-on
+# (Each script will commit its own changes, but to avoid triggering redundant GitHub workflow runs,
+# don't push the Git commits until all scripts have finished.)
+if [ "$AddonUpdate" = 'y' ] ; then
+  find . -mindepth 2 -maxdepth 2 -name update -L -type f -executable \
+   -execdir '{}' "${ScriptArgs[@]}" --no-push '+'
+fi
+
+# If the above resulted in any commits, push Git
+if [ "$GitPush" = 'y' ] && git diff --quiet HEAD..origin ; then
+  git push
+fi

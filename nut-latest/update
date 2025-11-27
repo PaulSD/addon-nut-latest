@@ -1,0 +1,5 @@
+#!/bin/bash
+set -e
+
+# check how run
+# if version is 'reset' then force reset
