@@ -6,29 +6,46 @@ Usage()
   cat <<END >&2
 Usage: $ScriptName [options]
 
-This script updates the Git repository URL and maintainer in 'repository.yaml',
-calls the \`update\` script for each add-on in this repository (which will
-update Git URLs, maintainer references, version numbers, etc for the add-on),
-then commits and pushes the Git repo.
+This script is intended to support:
+* Checking for upstream updates (for all Add-ons in this repository),
+  incorporating any upstream updates into the Add-ons, and automatically
+  releasing new Add-on versions when appropriate.
+* Changing URLs and maintainer references (including in all Add-ons in this
+  repository), for use after forking this Git repository.
+
+Be aware that automation for additional use cases is available via the \`update\`
+script in each Add-on directory.  (Most of the functionality here is implemented
+by calling those scripts.)
 
 This script is primarily intended to be run by a GitHub workflow, but may be run
 manually.
 
+By default, all changes will be committed to Git and pushed.
+
 Options:
 
-  --git-repo <url>       Specify Git repository URL
+  --git-repo <url>       Specify this Git repository's URL.
     If run by a GitHub workflow and this is not specified, the Git repository
-    URL will be automatically detected.
-    If run manually and this is not specified, the Git repository URL will not
-    be updated.
-  --maintainer <value>   Specify maintainer
+    URL will be automatically detected, and configs will only be changed if the
+    URL changes.
+    If run manually and this is not specified, URLs based on the Git repository
+    URL will not be changed.
+  --ha-repo <url>        Specify the URL where this HA Add-on Repo is published.
+    In most cases this should be the Git repository's URL, but it may be
+    different if the HA Add-on Repository is separate from the source Git repo.
+    If the Git repository URL changes and this is not specified, the Git
+    repository URL will be used.
+  --maintainer <value>   Specify maintainer.
     HA recommends setting this to 'Full Name <email@example.com>'.
-    If run by a GitHub workflow and this is not specified, the Git repository
-    owner username will be used.
-    If run manually and this is not specified, the maintainer will not be
-    updated.
+    If run by a GitHub workflow and the Git repository URL changes and this is
+    not specified, the Git repository owner username or owner URL (depending on
+    where it is used) will be used.
+    If run manually and this is not specified, maintainer references will not be
+    changed.
 
-  --no-addon-update      Do not run the \`update\` script for each add-on.
+  --no-addon-update      Do not run the \`update\` script for each Add-on.
+    (Only perform functionality that does not depend on those scripts.)
+
   -n, --no-commit        Do not commit changes to Git.
   --no-push              Do not push Git commits.
 
@@ -37,32 +54,34 @@ END
 }
 
 ScriptName="$(basename "$0")"
-# Default to values provided by the GitHub workflow (or empty if not run by a GitHub workflow).
-if [ -n "$GITHUB_SERVER_URL" ] && [ -n "$GITHUB_REPOSITORY" ] ; then
-  GitRepo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
-else
-  GitRepo=
-fi
-Maintainer="$GITHUB_REPOSITORY_OWNER"
+NewGitRepo=
+NewHARepo=
+NewMaintainer=
 AddonUpdate='y'
 GitCommit='y'
 GitPush='y'
 AddonUpdateArgs=()
 
-# Parse command-line arguments
+# Parse command-line arguments.
 while [ $# -gt 0 ] ; do
   case "$1" in
     --git-repo)
       [ $# -eq 1 ] && Usage "URL required after '$1'"
       shift
-      GitRepo="$1"
-      AddonUpdateArgs+=(--git-repo "$GitRepo")
+      NewGitRepo="$1"
+      AddonUpdateArgs+=(--git-repo "$NewGitRepo")
+    ;;
+    --ha-repo)
+      [ $# -eq 1 ] && Usage "URL required after '$1'"
+      shift
+      NewHARepo="$1"
+      AddonUpdateArgs+=(--ha-repo "$NewHARepo")
     ;;
     --maintainer)
       [ $# -eq 1 ] && Usage "Maintainer value required after '$1'"
       shift
-      Maintainer="$1"
-      AddonUpdateArgs+=(--maintainer "$Maintainer")
+      NewMaintainer="$1"
+      AddonUpdateArgs+=(--maintainer "$NewMaintainer")
     ;;
     --no-addon-update)
       AddonUpdate='n'
@@ -73,7 +92,7 @@ while [ $# -gt 0 ] ; do
     ;;
     --no-push)
       GitPush='n'
-      # --no-push is added to $AddonUpdateArgs below
+      # --no-push is added to $AddonUpdateArgs below.
     ;;
     -h|--help)
       Usage
@@ -86,38 +105,106 @@ while [ $# -gt 0 ] ; do
 done
 
 set -e
-Script="$(readlink -e "$(which "$0")")"
+Script="$(which "$0")"
 cd "$(dirname "$Script")"  # This script's path
 
-# Check for changes that haven't been committed in Git
+# Check for changes that haven't been committed in Git.
 if [ -n "$(git status -s)" ] ; then
   echo 'ERROR: Detected changes that have not been committed in Git.' >&2
   echo 'Please commit or stash your changes in Git before running this script.' >&2
   exit 10
-# Check for Git commits that haven't been pushed
-elif ! git diff --quiet HEAD..@{push} ; then
+# Check for Git commits that haven't been pushed.
+elif [ "$GitPush" = 'y' ] && ! git diff --quiet HEAD..@{push} ; then
   echo 'ERROR: Detected Git commits that have not been pushed.' >&2
   echo 'Please push your Git commits before running this script.' >&2
   exit 11
 fi
 
-# Update the Git repository URL in 'repository.yaml'
-if [ -n "$GitRepo" ] ; then
-  perl -i -p -e 's/^(url: ).*$/$1'"$GitRepo"'/;' repository.yaml
+# Since the config changes applied by this script may not work in all cases (and may need to be
+# manually overridden in some cases), we only apply config changes when requested by command line
+# arguments or when run by a GitHub workflow and the Git repository URL changes (as opposed to
+# verifying/changing the configs on every run even if the inputs have not changed, which would
+# ensure consistency and make it easier to apply new changes after script updates but would
+# interfere with manual overrides).
+
+# Load saved parameters:
+# * $GitRepo is used to detect Git repository URL changes.
+source .update.conf
+
+# If --git-repo is not specified and script was run by a GitHub workflow, detect the Git repository
+# URL, and determine whether it changed.
+if [ -z "$NewGitRepo" ] && [ -n "$GITHUB_SERVER_URL" ] && [ -n "$GITHUB_REPOSITORY" ] ; then
+  NewGitRepo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+  if [ "$NewGitRepo" = "$GitRepo" ] ; then
+    #echo "No change to Git repository URL."
+    NewGitRepo=
+  else
+    echo -e "Git repository URL changed from '$GitRepo'\nto '$NewGitRepo'."
+    # If --ha-repo was not specified, use the new Git repository URL as the HA Add-on Repo URL.
+    [ -z "$NewHARepo" ] && NewHARepo="$NewGitRepo"
+    # If --maintainer was not specified, use the Git repository owner username as the Maintainer.
+    # We only use the owner username in this script.  If the owner URL is needed, use:
+    # "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY_OWNER"
+    [ -z "$NewMaintainer" ] && NewMaintainer="$GITHUB_REPOSITORY_OWNER"
+  fi
 fi
 
-# Update the Maintainer in 'repository.yaml'
-if [ -n "$Maintainer" ] ; then
-  perl -i -p -e 's/^(maintainer: ).*$/$1'"$Maintainer"'/;' repository.yaml
+# Update saved parameters.
+File='.update.conf'
+:> "$File"  # Clear file.
+for VarName in GitRepo ; do
+  if [ -n "${!New$VarName}" ] ; then  # if [ -n "$NewVar" ] ; then
+    declare "Old$VarName=${!$VarName}" # OldVar="$Var"
+    declare "$VarName=${!New$VarName}"  # Var="$NewVar"
+  fi
+  # Write variable definition to file.
+  printf '%s\n' "$VarName='${!$VarName}'" >> "$File"
+done
+if git diff --quiet "$File" ; then
+  echo "Changed '$File'."
+  git add -- "$File"
 fi
 
-# If the above resulted in any changes, commit the changes to Git
+# Convenience functions.
+MaybeChanged() {
+  local File="$1" Field="$2"
+  if git diff --quiet "$File" ; then
+    echo "Changed $Field in '$File'."
+    git add -- "$File"
+  else
+    echo "No change to $Field in '$File'."
+  fi
+}
+EnsureChanged() {
+  local File="$1" Field="$2"
+  if ! git diff --quiet "$File" ; then
+    echo "Failed to update $Field in '$File'." >&2
+    exit 100
+  fi
+  echo "Changed $Field in '$File'."
+  git add -- "$File"
+}
+
+if [ -n "$NewHARepo" ] ; then
+  File='repository.yaml' Field="'url' (HA Add-on Repo URL)"
+  perl -i -p -e 's/^(url: ).*$/$1"'"$HARepo"'"/;' "$File"
+  MaybeChanged "$File" "$Field"
+fi
+
+if [ -n "$NewMaintainer" ] ; then
+  File='repository.yaml' Field="'maintainer'"
+  perl -i -p -e 's/^(maintainer: ).*$/$1"'"$Maintainer"'"/;' "$File"
+  MaybeChanged "$File" "$Field"
+fi
+
+# If the above resulted in any changes then commit the changes to Git.
 if [ "$GitCommit" = 'y' ] && [ -n "$(git status -s)" ] ; then
-  git add --all .
-  git commit --all --message "(./$ScriptName) Update repository"
+  # For this use case, `git commit ...` is sufficient.
+  # For other use cases, `git add --all -- . ; git commit --all ...` may be needed.
+  git commit --message "(./$ScriptName) Update repository"
 fi
 
-# Run the `update` script for each add-on
+# Run the `update` script for each Add-on.
 if [ "$AddonUpdate" = 'y' ] ; then
   # Each script will commit its own changes, but to avoid triggering redundant GitHub workflow runs,
   # $AddonUpdateArgs always includes --no-push, and this script pushes after all scripts have been
@@ -128,9 +215,9 @@ if [ "$AddonUpdate" = 'y' ] ; then
   done 3< <(find -L . -mindepth 2 -maxdepth 2 -name update -type f -executable -print0)
 fi
 
-# If the above resulted in any commits, push Git
+# If the above resulted in any commits then push Git.
 if [ "$GitPush" = 'y' ] && ! git diff --quiet HEAD..@{push} ; then
   git push
 fi
 
-echo 'Completed successfully'
+echo 'Completed successfully.'

@@ -1,93 +1,67 @@
 #!/bin/bash
 
-# DOCS.md
-#  local repo URL in "Add ..."
-#  github-issue and contributors URLs
-#  addon-inst URL (generated from local repo URL and add-on name)
-#  addon-nut* URLs (source repos)
-#  (switch to addon-base?)
-# README.md
-#  base source URL (or URL+path)
-# icon.png logo.png
-#  pull from base repo (need base repo URL+path)
-# config.yaml
-#  pull from base repo to new file (add new file to .gitignore, and .sw*)
-#  substitute name from old file
-#  substitute image from old file
-#  update version: base->base_deb_local
-#  update slug (need dir name)
-#  update url (local URL+path)
-#  swap in new file
-# build.yaml
-#  pull from repo (need repo URL+path), substitute image path+version (from base config.yaml)
-# Dockerfile
-#  update BUILD_FROM (from base config.yaml image)
-#  update maintainer (if not specified, use URL)
-#  update authors (use URL)
-
-# check how run
-# if version is 'reset' then force reset
-
-#* Edit `nut-latest/config.yaml` and update the `url` and `image` fields.
-#  The `image` value must be lowercase.
-#* Edit `nut-latest/DOCS.md`:
-#  * Update the URL in step 1 of the "Installation" instructions.
-#  * Update `repository_url` parameter within the `addon-inst` URL.
-#  * Update the repository hash value in the `addon` parameter within the `addon-inst` URL.
-#    To calculate the new hash value, use one of the following:
-#    * `python` followed by `url = 'https://github.com/PaulSD/addons-nut'` (substitute your Git repo
-#      URL) followed by `import hashlib ; hashlib.sha1(url.lower().encode()).hexdigest()[:8] ; exit(>
-#      followed by `exit()`.
-#    * In a BASH shell, run `URL='https://github.com/PaulSD/addons-nut'` (substitute your Git repo
-#      URL) followed by ``.
-#      echo -n 'https://github.com/PaulSD/addon-nut-latest' | tr '[:upper:]' '[:lower:]' | sha1sum |>
-#  * Update the `github-issue` and `contributors` URLs.
-#* Edit `nut-latest/Dockerfile` and update the `maintainer` and `org.opencontainers.image.authors`
-#  fields.
-#
-#update version in config.yaml
-#if addon-nut repo changes, then update *.png and config.yaml (merge/patch)
-#
-#       for debian checks
-#        https://docs.github.com/en/actions/tutorials/store-and-share-data
-#        save last nut version and use cron dispatch to check/quit?
-#
-#
-#https://qa.debian.org/madison.php?package=nut&table=debian&a=&c=&s=unstable+&text=on#
-
-exit
-
-#!/bin/bash
-
 Usage()
 {
   [ -n "$1" ] && { echo "ERROR: $1" >&2 ; echo >&2 ; }
   cat <<END >&2
 Usage: $ScriptName [options]
 
-This script updates the Git repository URL and maintainer in 'repository.yaml',
-calls the \`update\` script for each add-on in this repository (which will
-update Git URLs, maintainer references, version numbers, etc for the add-on),
-then commits and pushes the Git repo.
+This script is intended to be run directly to support:
+* Releasing a new version of this Add-on, for use after making changes to this
+  Add-on or merging Git pull requests.
+* Changing this Add-on's directory name.
+* Changing the upstream Add-on that this Add-on is based on.
 
-This script is primarily intended to be run by a GitHub workflow, but may be run
-manually.
+This script is intended to be run indirectly (by \`../update\`) to support:
+* Checking for updates to the upstream Add-on and the Debian packages installed
+  by this Add-on, incorporating those updates, and automatically releasing a new
+  version of this Add-on when appropriate.
+* Changing URLs and maintainer references (including in all Add-ons in this
+  repository), for use after forking this Git repository.
+
+By default, all changes will be committed to Git and pushed.
 
 Options:
 
-  --git-repo <url>       Specify Git repository URL
+  --git-repo <url>       Specify this Git repository's URL.
     If run by a GitHub workflow and this is not specified, the Git repository
-    URL will be automatically detected.
-    If run manually and this is not specified, the Git repository URL will not
-    be updated.
-  --maintainer <value>   Specify maintainer
+    URL will be automatically detected, and configs will only be changed if the
+    URL changes.
+    If run manually and this is not specified, URLs based on the Git repository
+    URL will not be changed.
+  --ha-repo <url>        Specify the URL where this HA Add-on Repo is published.
+    In most cases this should be the Git repository's URL, but it may be
+    different if the HA Add-on Repository is separate from the source Git repo.
+    If the Git repository URL changes and this is not specified, the Git
+    repository URL will be used.
+  --maintainer <value>   Specify maintainer.
     HA recommends setting this to 'Full Name <email@example.com>'.
-    If run by a GitHub workflow and this is not specified, the Git repository
-    owner username will be used.
-    If run manually and this is not specified, the maintainer will not be
-    updated.
+    If run by a GitHub workflow and the Git repository URL changes and this is
+    not specified, the Git repository owner username or owner URL (depending on
+    where it is used) will be used.
+    If run manually and this is not specified, maintainer references will not be
+    changed.
 
-  --no-addon-update      Do not run the \`update\` script for each add-on.
+  --upstream-git-repo <url>
+    Specify the source Git repository of the upstream Add-on that this Add-on
+    should be based on.  When specified, --upstream-path must also be specified.
+    If not specified, config references to this URL will not be changed, and the
+    previously specified URL will be used to check for upstream updates.
+  --upstream-ha-repo <url>
+    Specify the HA Add-on Repository URL where the upstream Add-on is published,
+    if different from the source Git repository.
+    If --upstream-git-repo is specified and this is not specified, the
+    --upstream-git-repo URL will be used.  Otherwise, if not specified, config
+    references to this URL will not be changed, and the previously specified URL
+    will be used to check for upstream updates.
+  --upstream-path <path>
+    Specify the relative path of the upstream Add-on within the source Git
+    repository and HA Add-on Repository.
+    If not specified, config references to this path will not be changed, and
+    the previously specified path will be used to check for upstream updates.
+
+  -r, --release          Release a new version of this Add-on.
+
   -n, --no-commit        Do not commit changes to Git.
   --no-push              Do not push Git commits.
 
@@ -96,43 +70,57 @@ END
 }
 
 ScriptName="$(basename "$0")"
-# Default to values provided by the GitHub workflow (or empty if not run by a GitHub workflow).
-if [ -n "$GITHUB_SERVER_URL" ] && [ -n "$GITHUB_REPOSITORY" ] ; then
-  GitRepo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
-else
-  GitRepo=
-fi
-Maintainer="$GITHUB_REPOSITORY_OWNER"
-AddonUpdate='y'
+NewGitRepo=
+NewHARepo=
+NewMaintainer=
+NewUpstreamGitRepo=
+NewUpstreamHARepo=
+NewUpstreamRepoPath=
+Release='n'
 GitCommit='y'
 GitPush='y'
-AddonUpdateArgs=()
 
-# Parse command-line arguments
+# Parse command-line arguments.
 while [ $# -gt 0 ] ; do
   case "$1" in
     --git-repo)
       [ $# -eq 1 ] && Usage "URL required after '$1'"
       shift
-      GitRepo="$1"
-      AddonUpdateArgs+=(--git-repo "$GitRepo")
+      NewGitRepo="$1"
+    ;;
+    --ha-repo)
+      [ $# -eq 1 ] && Usage "URL required after '$1'"
+      shift
+      NewHARepo="$1"
     ;;
     --maintainer)
       [ $# -eq 1 ] && Usage "Maintainer value required after '$1'"
       shift
-      Maintainer="$1"
-      AddonUpdateArgs+=(--maintainer "$Maintainer")
+      NewMaintainer="$1"
     ;;
-    --no-addon-update)
-      AddonUpdate='n'
+    --upstream-git-repo)
+      [ $# -eq 1 ] && Usage "URL required after '$1'"
+      shift
+      NewUpstreamGitRepo="$1"
+    ;;
+    --upstream-ha-repo)
+      [ $# -eq 1 ] && Usage "URL required after '$1'"
+      shift
+      NewUpstreamHARepo="$1"
+    ;;
+    --upstream-path)
+      [ $# -eq 1 ] && Usage "Relative path required after '$1'"
+      shift
+      NewUpstreamRepoPath="$1"
+    ;;
+    -r|--release)
+      Release='y'
     ;;
     -n|--no-commit)
       GitCommit='n'
-      AddonUpdateArgs+=(--no-commit)
     ;;
     --no-push)
       GitPush='n'
-      # --no-push is added to $AddonUpdateArgs below
     ;;
     -h|--help)
       Usage
@@ -143,53 +131,307 @@ while [ $# -gt 0 ] ; do
   esac
   shift
 done
+[ -n "$NewUpstreamGitRepo" ] && [ -z "$NewUpstreamRepoPath" ] \
+ && Usage '--upstream-path is required if --upstream-git-repo is specified'
 
 set -e
-Script="$(readlink -e "$(which "$0")")"
+Script="$(which "$0")"
 cd "$(dirname "$Script")"  # This script's path
 
-# Check for changes that haven't been committed in Git
+# Check for changes that haven't been committed in Git.
 if [ -n "$(git status -s)" ] ; then
   echo 'ERROR: Detected changes that have not been committed in Git.' >&2
   echo 'Please commit or stash your changes in Git before running this script.' >&2
   exit 10
-# Check for Git commits that haven't been pushed
-elif ! git diff --quiet HEAD..@{push} ; then
+# Check for Git commits that haven't been pushed.
+elif [ "$GitPush" = 'y' ] && ! git diff --quiet HEAD..@{push} ; then
   echo 'ERROR: Detected Git commits that have not been pushed.' >&2
   echo 'Please push your Git commits before running this script.' >&2
   exit 11
 fi
 
-# Update the Git repository URL in 'repository.yaml'
-if [ -n "$GitRepo" ] ; then
-  perl -i -p -e 's/^(url: ).*$/$1'"$GitRepo"'/;' repository.yaml
+# Since the config changes applied by this script may not work in all cases (and may need to be
+# manually overridden in some cases), we only apply config changes when requested by command line
+# arguments or when run by a GitHub workflow and the Git repository URL changes (as opposed to
+# verifying/changing the configs on every run even if the inputs have not changed, which would
+# ensure consistency and make it easier to apply new changes after script updates but would
+# interfere with manual overrides).
+
+# Load saved parameters:
+# * $GitRepo is used to detect Git repository URL changes.
+# * $RepoPath is used to detect relative path changes for this Add-on.
+# TODO upstream params
+source .update.conf
+
+# If --git-repo is not specified and script was run by a GitHub workflow, detect the Git repository
+# URL, and determine whether it changed.
+if [ -z "$NewGitRepo" ] && [ -n "$GITHUB_SERVER_URL" ] && [ -n "$GITHUB_REPOSITORY" ] ; then
+  NewGitRepo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+  if [ "$NewGitRepo" = "$GitRepo" ] ; then
+    #echo "No change to Git repository URL."
+    NewGitRepo=
+  else
+    echo -e "Git repository URL changed from '$GitRepo'\nto '$NewGitRepo'."
+    # If --ha-repo was not specified, use the new Git repository URL as the HA Add-on Repo URL.
+    [ -z "$NewHARepo" ] && NewHARepo="$NewGitRepo"
+    # If --maintainer was not specified, use the Git repository owner URL as the Maintainer.
+    # We only use the owner URL in this script.  If the owner username is needed, use:
+    # "$GITHUB_REPOSITORY_OWNER"
+    [ -z "$NewMaintainer" ] && NewMaintainer="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY_OWNER"
+  fi
 fi
 
-# Update the Maintainer in 'repository.yaml'
-if [ -n "$Maintainer" ] ; then
-  perl -i -p -e 's/^(maintainer: ).*$/$1'"$Maintainer"'/;' repository.yaml
+# Detect the relative path of this Add-on within the source Git repository and HA Add-on Repository,
+# and determine whether it changed.
+NewRepoPath="$(basename "$(pwd)")"
+if [ "$NewRepoPath" = "$RepoPath" ] ; then
+  #echo "No change to Add-on relative path."
+  NewRepoPath=
+else
+  echo -e "Add-on relative path changed from '$RepoPath' to '$NewRepoPath'."
 fi
 
-# If the above resulted in any changes, commit the changes to Git
+# Update saved parameters.
+File='.update.conf'
+:> "$File"  # Clear file.
+# TODO upstream params
+for VarName in GitRepo RepoPath ; do
+  if [ -n "${!New$VarName}" ] ; then  # if [ -n "$NewVar" ] ; then
+    declare "Old$VarName=${!$VarName}" # OldVar="$Var"
+    declare "$VarName=${!New$VarName}"  # Var="$NewVar"
+  fi
+  # Write variable definition to file.
+  printf '%s\n' "$VarName='${!$VarName}'" >> "$File"
+done
+if git diff --quiet "$File" ; then
+  echo "Changed '$File'."
+  git add -- "$File"
+fi
+
+# Convenience functions.
+MaybeChanged() {
+  local File="$1" Field="$2"
+  if git diff --quiet "$File" ; then
+    echo "Changed $Field in '$RepoPath/$File'."
+    git add -- "$File"
+  else
+    echo "No change to $Field in '$RepoPath/$File'."
+  fi
+}
+EnsureChanged() {
+  local File="$1" Field="$2" To="$3"
+  if ! git diff --quiet "$File" ; then
+    echo "Failed to update $Field in '$RepoPath/$File'." >&2
+    exit 100
+  fi
+  if [ -z "$To" ] ; then
+    echo "Changed $Field in '$RepoPath/$File'."
+  else
+    echo -e "Changed $Field in '$RepoPath/$File'\nto '$To'."
+  fi
+  git add -- "$File"
+}
+
+# TODO down
+
+# TODO handle repopath changes
+
+# The $UpstreamGitRepo, $UpstreamHARepo, and $UpstreamPath values are needed on every run of this
+# script (in order to retrieve files from the upstream HA/Git repos), so we save their previous
+# values here.
+PrevUpstreamGitRepo='https://github.com/hassio-addons/addon-nut'
+PrevUpstreamHARepo='https://github.com/hassio-addons/repository'
+PrevUpstreamPath='nut'
+
+if [ -n "$UpstreamGitRepo" ] ; then
+  if [ "$UpstreamGitRepo" != "$PrevUpstreamGitRepo" ] ; then
+    File='update' Field="'PrevUpstreamGitRepo'"
+    perl -i -p -e 's/^(PrevUpstreamGitRepo=).*$/$1'"'$UpstreamGitRepo'"'/;' "$File"
+    git diff --quiet "$File" || { echo "Failed to update $Field in '$RepoPath/$File'" >&2 ; exit 100 ; }
+    echo "Updated $Field in '$RepoPath/$File'"
+    git add -- "$File"
+  fi
+  # TODO WIP
+
+  # If $UpstreamGitRepo is specified and $UpstreamHARepo is not, set $UpstreamHARepo to
+  # $UpstreamGitRepo.
+  [ -z "$UpstreamHARepo" ] && UpstreamHARepo="$UpstreamGitRepo"
+else
+  UpstreamGitRepo="$PrevUpstreamGitRepo"
+fi
+
+
+# TODO
+# refactor below based on change?
+
+if [ -n "$UpstreamGitRepo" ] ; then
+  echo >&2
+  echo "WARNING: The text in 'README.md' and 'DOCS.md' under '$RepoPath/' will not make" >&2
+  echo 'sense after changing the upstream Add-on that this Add-on is based on.' >&2
+  echo 'You will need to manually review/update the text in those files.' >&2
+  echo >&2
+
+  File='README.md' Field="'addon-base' URL"
+  # For most Add-ons, we should link to the relevant Add-on sub-directory.  However, the NUT Add-on
+  # source Git repo does not have a visible README.md in that path, but does have one in the parent
+  # path, so link to the parent path instead.
+  if [ "$UpstreamGitRepo" = 'https://github.com/hassio-addons/addon-nut' ] ; then
+    URL="$UpstreamGitRepo"
+  else
+    URL="$UpstreamGitRepo/tree/main/$UpstreamRepoPath"
+  fi
+  perl -i -p -e 's/^(\[addon-base\]: ).*$/$1'"$URL"'/;' "$File"
+  MaybeChanged "$File" "$Field"
+
+  File='DOCS.md' Field="'addon-base' URL"
+  # Use the same $URL that was used for 'README.md' above.
+  perl -i -p -e 's/^(\[addon-base\]: ).*$/$1'"$URL"'/;' "$File"
+  MaybeChanged "$File" "$Field"
+
+  File='DOCS.md' Field="'addon-base-docs*' URLs"
+  URL="$UpstreamGitRepo/blob/main/$UpstreamRepoPath/DOCS.md"
+  perl -i -p -e 's/^(\[addon-base-docs(?:-.+)?\]: )[^#\n]*(#.+)?$/$1'"$URL"'$2/;' "$File"
+  MaybeChanged "$File" "$Field"
+
+  # If $UpstreamGitRepo is specified and $UpstreamHARepo is not, set $UpstreamHARepo to
+  # $UpstreamGitRepo.
+  [ -z "$UpstreamHARepo" ] && UpstreamHARepo="$UpstreamGitRepo"
+fi
+
+if [ -n "$UpstreamHARepo" ] ; then
+  # TODO
+  :
+fi
+# TODO up
+
+if [ -n "$NewGitRepo" ] || [ -n "$NewRepoPath" ] ; then
+  GitRepo="${GitRepo%/}"  # Remove trailing / if present
+  # If $GitRepo does not start with 'https://github.com/'.
+  if [ "$GitRepo" = "${GitRepo#https://github.com/}" ] ; then
+    echo >&2
+    echo 'WARNING: Non-GitHub Git repo URLs may not be handled properly.' >&2
+    echo 'You should manually check/fix the following URLs.' >&2
+    echo >&2
+    GitHub='n'
+  else
+    GitHub='y'
+  fi
+
+  File='config.yaml' Field="'url' (Add-on source URL)" URL="$GitRepo/tree/main/$RepoPath"
+  perl -i -p -e 's/^(url: ).*$/$1"'"$URL"'"/;' "$File"
+  [ "$GitHub" = 'y' ] && To= || To="$URL" ; EnsureChanged "$File" "$Field" "$To"
+
+  if [ -n "$NewGitRepo" ] ; then
+    File='DOCS.md' Field="'github-issue' URL" URL="$GitRepo/issues"
+    perl -i -p -e 's/^(\[github-issue\]: ).*$/$1'"$URL"'/;' "$File"
+    [ "$GitHub" = 'y' ] && To= || To="$URL" ; EnsureChanged "$File" "$Field" "$To"
+
+    File='DOCS.md' Field="'contributors' URL" URL="$GitRepo/graphs/contributors"
+    perl -i -p -e 's/^(\[contributors\]: ).*$/$1'"$URL"'/;' "$File"
+    [ "$GitHub" = 'y' ] && To= || To="$URL" ; EnsureChanged "$File" "$Field" "$To"
+
+    File='Dockerfile' Field="'authors' Label" URL="$GitRepo/graphs/contributors"
+    perl -i -p -e 's/^([ \t]*org.opencontainers.image.authors=).*( \\)?$/$1"'"$URL"'"$2/;' "$File"
+    [ "$GitHub" = 'y' ] && To= || To="$URL" ; EnsureChanged "$File" "$Field" "$To"
+  fi
+
+  File='config.yaml' Field="'image'"
+  # TODO should this go outside the parent if block?
+  if [ -n "$HARepo" ] && [ "$HARepo" != "$GitRepo" ] ; then
+    perl -i -p -e 's/^image: .*\n//;' "$File"
+    if git diff --quiet "$File" ; then
+      git add -- "$File"
+      echo "Removed $Field from '$RepoPath/$File'"
+    else
+      echo "No change to $Field already removed from '$RepoPath/$File'"
+    fi
+    echo '(Assuming something else will populate it since Git and HA repos are different.)'
+  else
+    if [ "$GitHub" = 'y' ] ; then
+      GitRepoOwner="${GitRepo#https://github.com/}" ; GitRepoOwner="${Owner%%/*}"
+      Image="ghcr.io/$GitRepoOwner/ha-addon-$RepoPath-{arch}"
+      # Image must be lowercase or it will be rejected by the following code in HA, which will
+      # prevent the Add-on from being shown in the HA Add-on Store:
+      # https://github.com/home-assistant/supervisor/blob/6302c7d394e51fa8f9a7554a1458c0e9043e03d6/supervisor/validate.py#L62
+      Image="$(echo "$Image" | tr '[:upper:]' '[:lower:]')"
+      if grep -q '^image: ' "$File" ; then
+        perl -i -p -e 's/^(image: ).*$/$1"'"$Image"'"/;' "$File"
+      else
+        echo "image: \"$Image\"" >> "$File"
+      fi
+      EnsureChanged "$File" "$Field"
+    else
+      echo >&2
+      echo 'WARNING: Cannot automatically determine container image name for non-GitHub Git' >&2
+      echo "repo.  You must manually populate $Field in '$RepoPath/$File'." >&2
+      echo >&2
+      perl -i -p -e 's/^image: .*\n//;' "$File"
+      if git diff --quiet "$File" ; then
+        git add -- "$File"
+        echo "Removed $Field from '$RepoPath/$File'"
+      else
+        echo "No change to $Field already removed from '$RepoPath/$File'"
+      fi
+    fi
+  fi
+fi
+
+if [ -n "$NewHARepo" ] ; then
+  File='DOCS.md' Field="HA Add-on Repo URL in 'Installation' instructions"
+  perl -i -p -e 's/(-> Add ).*?( ->)/$1'"$HARepo"'$2/;' "$File"
+  MaybeChanged "$File" "$Field"
+fi
+
+if [ -n "$NewHARepo" ] || [ -n "$NewRepoPath" ] ; then
+  File='DOCS.md' Field="'addon-inst' URL"
+  # Calculate the repo URL hash using shell commands installed by default in GitHub workflows.
+  # (Perl is installed but not Digest::SHA1.  Python is not installed.  We could install them, but
+  # this is easier/faster.)
+  # Python code, for reference: import hashlib ; hashlib.sha1(url.lower().encode()).hexdigest()[:8]
+  Hash="$(echo -n "$HARepo" | tr '[:upper:]' '[:lower:]' | sha1sum | cut -c -8)"
+  # URL Encode the repo URL using a simple Perl regex.  (URI::Escape is not installed.)
+  Encoded="$(echo -n "$HARepo" | perl -p -e 's/([^a-zA-Z0-9._~-])/sprintf("%%%02X", ord($1))/ge')"
+  Params="?addon=$Hash_$RepoPath&repository_url=$Encoded"
+  perl -i -p -e 's/^(\[addon-inst\]: [^?\n]+)\?.*$/$1'"$Params"'/;' "$File"
+  MaybeChanged "$File" "$Field"
+fi
+
+if [ -n "$NewMaintainer" ] ; then
+  File='Dockerfile' Field="'maintainer' Label"
+  perl -i -p -e 's/^([ \t]*maintainer=).*( \\)?$/$1"'"$Maintainer"'"$2/;' "$File"
+  MaybeChanged "$File" "$Field"
+fi
+
+# TODO
+# need to install curl or wget
+# icon.png logo.png
+#  pull from upstream repo (need upstream repo URL+path)
+# config.yaml
+#  pull from upstream repo to new file (add new file to .gitignore)
+#  substitute name from old file
+#  substitute image from old file
+#  update version: upstream->upstream_deb_local
+#  update slug (need dir name)
+#  update url (local URL+path)
+#  swap in new file
+# build.yaml
+#  pull from repo (need repo URL+path), substitute image path+version (from upstream config.yaml)
+# Dockerfile
+#  update BUILD_FROM (from upstream config.yaml image)
+#
+#https://qa.debian.org/madison.php?package=nut&table=debian&a=&c=&s=unstable+&text=on#
+
+# If the above resulted in any changes then commit the changes to Git.
 if [ "$GitCommit" = 'y' ] && [ -n "$(git status -s)" ] ; then
-  git add --all .
-  git commit --all --message "(./$ScriptName) Update repository"
+  # For this use case, `git commit ...` is sufficient.
+  # For other use cases, `git add --all -- . ; git commit --all ...` may be needed.
+  # TODO release message?
+  git commit --message "($RepoPath/$ScriptName) Update $RepoPath Add-on"
 fi
 
-# Run the `update` script for each add-on
-if [ "$AddonUpdate" = 'y' ] ; then
-  # Each script will commit its own changes, but to avoid triggering redundant GitHub workflow runs,
-  # $AddonUpdateArgs always includes --no-push, and this script pushes after all scripts have been
-  # run.
-  AddonUpdateArgs+=(--no-push)
-  while read -u3 -r -d $'\0' Script ; do
-    "$Script" "${AddonUpdateArgs[@]}"
-  done 3< <(find -L . -mindepth 2 -maxdepth 2 -name update -type f -executable -print0)
-fi
-
-# If the above resulted in any commits, push Git
+# If the above resulted in any commits then push Git.
 if [ "$GitPush" = 'y' ] && ! git diff --quiet HEAD..@{push} ; then
   git push
 fi
 
-echo 'Completed successfully'
+echo 'Completed successfully.'

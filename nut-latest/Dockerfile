@@ -2,7 +2,8 @@ ARG BUILD_FROM=ghcr.io/hassio-addons/nut:stable
 # hadolint ignore=DL3006
 FROM ${BUILD_FROM}
 
-# For clarity, upgrade Debian Stable before upgrading NUT.
+# To avoid mixing Debian Stable upgrades with Debian Unstable upgrades (for clarity and to simplify
+# troubleshooting), upgrade Debian Stable before upgrading to anything in Debian Unstable.
 RUN \
     apt-get update \
     && apt-get -o 'Dpkg::Options::=--force-confold' dist-upgrade -y \
