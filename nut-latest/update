@@ -150,6 +150,7 @@ elif [ "$GitPush" = 'y' ] && ! git diff --quiet HEAD..@{push} ; then
   exit 11
 fi
 
+TODO or when dir changes
 # Since the config changes applied by this script may not work in all cases (and may need to be
 # manually overridden in some cases), we only apply config changes when requested by command line
 # arguments or when run by a GitHub workflow and the Git repository URL changes (as opposed to
@@ -159,6 +160,7 @@ fi
 
 # Load saved parameters:
 # * $GitRepo is used to detect Git repository URL changes.
+TODO and handle harepo change?
 # * $RepoPath is used to detect relative path changes for this Add-on.
 # TODO upstream params
 source .update.conf
@@ -336,7 +338,7 @@ if [ -n "$NewGitRepo" ] || [ -n "$NewRepoPath" ] ; then
   fi
 
   File='config.yaml' Field="'image'"
-  # TODO should this go outside the parent if block?
+  # TODO should this go outside the parent if block? yes
   if [ -n "$HARepo" ] && [ "$HARepo" != "$GitRepo" ] ; then
     perl -i -p -e 's/^image: .*\n//;' "$File"
     if git diff --quiet "$File" ; then
